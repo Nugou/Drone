@@ -4,13 +4,14 @@
  * Montar o codigo de operaçao dos motores.
  * Montar o codigo do modulo RF 433Mhz.
  * Montar o codigo da Camera(Vga Ov7670). 
- * Montar o codigo do Modulo RF Lora1278(Melhor).
+ * Montar o codigo do Modulo RF Lora1278(Melhor) -> Biblioteca pronta no github.
  * (Terminado)Montar o codigo do Modulo HC-05. -> Teste feitos com sucesso, mais ainda da para melhorar. (desistencia desse modulo, pois curta distancia).
  * Montar o codigo EEPROM para memorizar dados importante. 
  * (Terminado)Montar o codigo do MPU-6050. -> Esperando testes no drone.
  * Montar o codigo para o drone voltar a origem quando: estar com bateria fraca, perdeu conexao com o controle. 
  * Montar o codigo do controle de PS2.
  * Montar o codigo de funçao do drone, como dar 360°, planar de cabeça para baixo, gravar video, tirar print, etc;
+ * Montar o codigo do modulo GPS;
  */
 
 #include <Wire.h>
