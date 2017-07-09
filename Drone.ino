@@ -4,18 +4,19 @@
  * Montar o codigo de operaçao dos motores.
  * Montar o codigo do modulo RF 433Mhz.
  * Montar o codigo da Camera(Vga Ov7670). 
- * Montar o codigo do Modulo RF Lora1278(Melhor).
+ * Montar o codigo do Modulo RF Lora1278(Melhor) -> Biblioteca pronta no github.
  * (Terminado)Montar o codigo do Modulo HC-05. -> Teste feitos com sucesso, mais ainda da para melhorar. (desistencia desse modulo, pois curta distancia).
  * Montar o codigo EEPROM para memorizar dados importante. 
  * (Terminado)Montar o codigo do MPU-6050. -> Esperando testes no drone.
  * Montar o codigo para o drone voltar a origem quando: estar com bateria fraca, perdeu conexao com o controle. 
  * Montar o codigo do controle de PS2.
  * Montar o codigo de funçao do drone, como dar 360°, planar de cabeça para baixo, gravar video, tirar print, etc;
+ * Montar o codigo do modulo GPS;
  */
 
 #include <Wire.h>
 #include <Servo.h>
-#include <PID_v1.h>
+#include <PIDX.h>
 #include <RCSwitch.h>
 #include <SPI.h>
 
@@ -69,11 +70,11 @@ double motor_Kp = 0.002; //tenta aproximar do valor setpoint (padrao: 0.002)
 double motor_Ki = 0.0; //adiciona valores para aproximar aproximaçao (padrao: 0.001)
 double motor_Kd = 0.0; //Tenta manter estavel os valores (padrao: 0.0008)
 
-double mpu_Setpoint, mpu_Input, mpu_Output; //Nada a alterar
-double motor_Setpoint, motor_Input, motor_Output; //Nada a alterar
+double mpu_Setpoint = 0.0, mpu_Input, mpu_Output; //Nada a alterar
+double motor_Setpoint = 0.0, motor_Input, motor_Output; //Nada a alterar
 
-PID PID_MPU(&mpu_Input, &mpu_Output, &mpu_Setpoint, mpu_Kp, mpu_Ki, mpu_Kd, DIRECT);
-PID PID_MOTOR(&motor_Input, &motor_Output, &motor_Setpoint, mpu_Kp, mpu_Ki, mpu_Kd, DIRECT);
+PIDX PID_MPU(mpu_Kp, mpu_Ki, mpu_Kd, mpu_Setpoint);
+PIDX PID_MOTOR(motor_Kp, motor_Ki, motor_Kd, motor_Setpoint);
 
 int sampleTime = timeCheckerMPU; //Tempo para habilitar a leitura no modulo MPU-6050.(Nada a alterar)
 
@@ -144,14 +145,10 @@ void setup() {
 
 	//////////////////////////////////////////////////////////
 	
-	PID_MPU.SetMode(AUTOMATIC);
-	PID_MPU.SetSampleTime(sampleTime);
 	mpu_minPID = -180;
 	mpu_maxPID = 180;
 	mpu_Setpoint = 0;
 
-	PID_MOTOR.SetMode(AUTOMATIC);
-	PID_MOTOR.SetSampleTime(sampleTime);
 	motor_minPID = 0;
 	motor_maxPID = 255;
 	motor_Setpoint = 00;
@@ -239,7 +236,6 @@ void loop() {
 				}
 			}
 		}
-		SPI.receive();
 	}
 	if((Rdirection == "R_Center") && (Ldirection == "L_U_Right")){
 		//O drone vai para cima girando para o sentido horario
@@ -576,16 +572,16 @@ void moduleLora(){
 double calculatePID_mpu(int varInt){
 	mpu_Input = varInt;
 	delay(sampleTime+5); //minimo 100 (para evitar erros nos calculos)
-	PID_MPU.SetOutputLimits(mpu_minPID, mpu_maxPID); 
-	PID_MPU.Compute();
+	PID_MPU.setOutputLimits(mpu_minPID, mpu_maxPID); 
+	mpu_Output = PID_MPU.Process(mpu_Input);
 	return mpu_Output;
 }
 
 double calculatePID_motor(int varInt){
 	motor_Input = varInt;
 	delay(sampleTime+5); //minimo 100 (para evitar erros nos calculos)
-	PID_MOTOR.SetOutputLimits(motor_minPID, motor_maxPID); 
-	PID_MOTOR.Compute();
+	PID_MOTOR.setOutputLimits(motor_minPID, motor_maxPID); 
+	motor_Output = PID_MOTOR.Process(motor_Input);
 	return motor_Output;
 }
 
