@@ -2,41 +2,36 @@
  * Lembrete para o que precisa ser feito.
  * Colocar acentos nas palavras do comentario, meu teclado esta bugado. 
  * Montar o codigo de operaçao dos motores.
- * Montar o codigo do modulo RF 433Mhz.
- * Montar o codigo da Camera(Vga Ov7670). 
- * Montar o codigo do Modulo RF Lora1278(Melhor) -> Biblioteca pronta no github.
- * (Terminado)Montar o codigo do Modulo HC-05. -> Teste feitos com sucesso, mais ainda da para melhorar. (desistencia desse modulo, pois curta distancia).
+ * (Descontinuado)Montar o codigo do modulo RF 433Mhz.
+ * (Descontinuado)Montar o codigo da Camera(Vga Ov7670). 
+ * (Descontinuado)Montar o codigo do Modulo RF Lora1278(Melhor) -> Biblioteca pronta no github.
+ * (Terminado)(Descontinuado)Montar o codigo do Modulo HC-05. -> Teste feitos com sucesso, mais ainda da para melhorar. (desistencia desse modulo, pois curta distancia).
  * Montar o codigo EEPROM para memorizar dados importante. 
  * (Terminado)Montar o codigo do MPU-6050. -> Esperando testes no drone.
  * Montar o codigo para o drone voltar a origem quando: estar com bateria fraca, perdeu conexao com o controle. 
  * Montar o codigo do controle de PS2.
- * Montar o codigo de funçao do drone, como dar 360°, planar de cabeça para baixo, gravar video, tirar print, etc;
- * Montar o codigo do modulo GPS;
+ * Montar o codigo de funçao do drone, como dar 360°, monitoramento de area, etc.
+ * Montar o codigo do modulo GPS.
  */
 
 #include <Wire.h>
 #include <Servo.h>
 #include <PIDX.h>
-#include <RCSwitch.h>
 #include <SPI.h>
 
 Servo ServoMotor;
-RCSwitch RF_Receive = RCSwitch();
 
 /*
  * Tipo 0 -> O drone e controlado via bluetooth
- * Tipo 1 -> O drone e controlado via RF 433Mhz
- * Tipo 2 -> O drone e controlado via LoRa1278
+ * Tipo 1 -> O drone e controlado via RF NRF24L01
  * 
  * Dependendo do tipo, deve-se setar as portas dos repectivos modulos:
  * Bluetooth: Usa o pino Rx e Tx, pino 3.
- * Modulo RF 433MHz: Usa a pino 3.
- * Modulo RF LoRa1278: ainda desconhecido.
+ * Modulo RF NRF24L01: Usa bastante pino.
  * 
- * Atençao: 
- * -- Com o modulo RF 433Mhz, funçao de status sao desativados, ja que o drone apenas recebera informaçao e nao os enviara.
+ * Atençao:
  * -- Com o modulo BlueTooth, funçao todas ativadas, porem a pouca distancia, ideal para testes iniciais.
- * -- Com o modulo Lora1278, tudo funcionando e longa distancia. 
+ * -- Com o modulo RF NRF24L01, tudo funcionando e longa distancia. 
  */
 const int type_control = 0;
 
@@ -50,17 +45,17 @@ int power_motor = 5; //incremento/decremento da força dos motores
 String data = ""; //Dados recebido do joystick
 
 long timeCheckerMPU = 50; //Delay de verificaçao do MPU-6050
-long timeCheckerCOM = 5; //Delay de verificaçao do Modulo de comunicaçao geral.(Modulo BlueTooth, MOdulo RF 433Mhz, Modulo LoRa1278)
+long timeCheckerCOM = 5; //Delay de verificaçao do Modulo de comunicação geral.(Modulo BlueTooth, Modulo RF NRF24L01)
 
-unsigned long timeMPU = timeCheckerMPU; //Tempo para leitura do modulo MPU-6050.(Nada alterar aqui)
-unsigned long timeCOM = timeCheckerCOM; //Tempo para leitura do modulo de comunicaçao.(Nada alterar aqui)
+unsigned long timeMPU = timeCheckerMPU; //Tempo para leitura do módulo MPU-6050.(Nada alterar aqui)
+unsigned long timeCOM = timeCheckerCOM; //Tempo para leitura do módulo de comunicação.(Nada alterar aqui)
 
-String Rdirection = "R_Center"; //Direçao do joystick Direito
-String Ldirection = "L_Center"; //Direçao do joystick Esquerdo
+String Rdirection = "R_Center"; //Direção do joystick Direito inicial
+String Ldirection = "L_Center"; //Direção do joystick Esquerdo inicial
 
 
-double mpu_minPID, mpu_maxPID; //maximo e minimo do sensor MPU-6050
-double motor_minPID, motor_maxPID; //maximo e minimo dos motores
+double mpu_minPID, mpu_maxPID; //máximo e mínimo do sensor MPU-6050
+double motor_minPID, motor_maxPID; //máximo e mínimo dos motores
 
 double mpu_Kp = 0.002; //tenta aproximar do valor setpoint (padrao: 0.002) 
 double mpu_Ki = 0.0; //adiciona valores para aproximar aproximaçao (padrao: 0.001)
@@ -73,12 +68,20 @@ double motor_Kd = 0.0; //Tenta manter estavel os valores (padrao: 0.0008)
 double mpu_Setpoint = 0.0, mpu_Input, mpu_Output; //Nada a alterar
 double motor_Setpoint = 0.0, motor_Input, motor_Output; //Nada a alterar
 
+/*
+ * Declarando objetos
+ */
+
 PIDX PID_MPU(mpu_Kp, mpu_Ki, mpu_Kd, mpu_Setpoint);
 PIDX PID_MOTOR(motor_Kp, motor_Ki, motor_Kd, motor_Setpoint);
 
+/*
+ * Fim
+ */
+
 int sampleTime = timeCheckerMPU; //Tempo para habilitar a leitura no modulo MPU-6050.(Nada a alterar)
 
-boolean User_Control = false;
+bool User_Control = false;
 
 
 void setup() {
@@ -547,25 +550,6 @@ void moduleBluetooth(){
 }
 
 void moduleRf(){
-	if(RF_Receive.available()){
-		int value = RF_Receive.getReceivedValue();
-		if (value == 0) {
-			Serial.print("Erro desconhecido");
-		} else {
-			data = RF_Receive.getReceivedValue();
-			Serial.print("Recebido ");
-			Serial.print( RF_Receive.getReceivedValue() );
-			Serial.print(" / ");
-			Serial.print( RF_Receive.getReceivedBitlength() );
-			Serial.print("bit ");
-			Serial.print("Protocolo: ");
-			Serial.println( RF_Receive.getReceivedProtocol() );
-		}
-		RF_Receive.resetAvailable();
-	}
-}
-
-void moduleLora(){
 	
 }
 
