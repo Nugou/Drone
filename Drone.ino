@@ -12,28 +12,16 @@
  * Montar o codigo do controle de PS2.
  * Montar o codigo de funçao do drone, como dar 360°, monitoramento de area, etc.
  * Montar o codigo do modulo GPS.
+ * (Terminado) Montar o codigo do modulo nrf24l01 
  */
 
 #include <Wire.h>
 #include <Servo.h>
 #include <PIDX.h>
 #include <SPI.h>
+#include <RF24.h>
 
 Servo ServoMotor;
-
-/*
- * Tipo 0 -> O drone e controlado via bluetooth
- * Tipo 1 -> O drone e controlado via RF NRF24L01
- * 
- * Dependendo do tipo, deve-se setar as portas dos repectivos modulos:
- * Bluetooth: Usa o pino Rx e Tx, pino 3.
- * Modulo RF NRF24L01: Usa bastante pino.
- * 
- * Atençao:
- * -- Com o modulo BlueTooth, funçao todas ativadas, porem a pouca distancia, ideal para testes iniciais.
- * -- Com o modulo RF NRF24L01, tudo funcionando e longa distancia. 
- */
-const int type_control = 0;
 
 int AcX,AcY,AcZ,Tmp,GyX,GyY,GyZ; //Dados do sensor MPU-6050
 double AcX_End, AcY_End, AcZ_End, GyX_End, GyY_End, GyZ_End;//Dados finais do sensor MPU_6050
@@ -57,13 +45,13 @@ String Ldirection = "L_Center"; //Direção do joystick Esquerdo inicial
 double mpu_minPID, mpu_maxPID; //máximo e mínimo do sensor MPU-6050
 double motor_minPID, motor_maxPID; //máximo e mínimo dos motores
 
-double mpu_Kp = 0.002; //tenta aproximar do valor setpoint (padrao: 0.002) 
-double mpu_Ki = 0.0; //adiciona valores para aproximar aproximaçao (padrao: 0.001)
+double mpu_Kp = 0.0056; //tenta aproximar do valor setpoint (padrao: 0.0056) 
+double mpu_Ki = 0.0; //adiciona valores para aproximar aproximação (padrao: 0.001)
 double mpu_Kd = 0.0; //Tenta manter estavel os valores (padrao: 0.0008)
 
-double motor_Kp = 0.002; //tenta aproximar do valor setpoint (padrao: 0.002) 
-double motor_Ki = 0.0; //adiciona valores para aproximar aproximaçao (padrao: 0.001)
-double motor_Kd = 0.0; //Tenta manter estavel os valores (padrao: 0.0008)
+double motor_Kp = 0.002; //tenta aproximar do valor setpoint (padrão: 0.002) 
+double motor_Ki = 0.0; //adiciona valores para aproximar aproximação (padrão: 0.001)
+double motor_Kd = 0.0; //Tenta manter estavel os valores (padrão: 0.0008)
 
 double mpu_Setpoint = 0.0, mpu_Input, mpu_Output; //Nada a alterar
 double motor_Setpoint = 0.0, motor_Input, motor_Output; //Nada a alterar
@@ -75,6 +63,8 @@ double motor_Setpoint = 0.0, motor_Input, motor_Output; //Nada a alterar
 PIDX PID_MPU(mpu_Kp, mpu_Ki, mpu_Kd, mpu_Setpoint);
 PIDX PID_MOTOR(motor_Kp, motor_Ki, motor_Kd, motor_Setpoint);
 
+RF24 radio(7,8);
+
 /*
  * Fim
  */
@@ -83,13 +73,16 @@ int sampleTime = timeCheckerMPU; //Tempo para habilitar a leitura no modulo MPU-
 
 bool User_Control = false;
 
+bool radioNumber = 1;
+
+byte addresses[][6] = {"1Node","2Node"};
+
 
 void setup() {
 	Wire.begin(); 
-	Serial.begin(9600);
+	Serial.begin(115200);
 	SPI.begin();
-
-	RF_Receive.enableReceive(0);
+	radio.begin();
 	
 	/////////////////////////////////////////////////////////////////////
 
@@ -154,13 +147,26 @@ void setup() {
 
 	motor_minPID = 0;
 	motor_maxPID = 255;
-	motor_Setpoint = 00;
+	motor_Setpoint = 0;
 
 	////////////////////////////////////////////////////////
+
+	if(radioNumber){
+		radio.openWritingPipe(addresses[1]);
+		radio.openReadingPipe(1,addresses[0]);
+	}else{
+		radio.openWritingPipe(addresses[0]);
+		radio.openReadingPipe(1,addresses[1]);
+	}
+
+	radio.startListening();
+
+	/////////////////////////////////////////////////
 	
 }
 
 void loop() {
+	/*Verificador do modulo MPU-6050(Giroscopio)*/
 	if(timeMPU <= millis()){
 		timeMPU += timeCheckerMPU;
 		Wire.beginTransmission(MPU);
@@ -192,6 +198,7 @@ void loop() {
 				//Drone esta estabilizado no eixo X
 			}else{
 				//Comando para estabilizar o drone no eixo X
+				
 			}
 			if(GyY_End > -3 && GyY_End < 3){
 				//Drone esta estabilizado no eixo Y
@@ -210,17 +217,10 @@ void loop() {
 		}
 	}
 
+	/*Verificador do modulo nrf24l01*/
 	if(timeCOM <= millis()){
 		timeCOM += timeCheckerCOM;
-		if(type_control == 0){
-			moduleBluetooth();
-		}
-		if(type_control == 1){
-			moduleRf();
-		}
-		if(type_control == 2){
-			moduleLora();
-		}
+		moduleNrf();
 	}
 
 	if((Rdirection == "R_Center") && (Ldirection == "L_Center")){
@@ -518,39 +518,44 @@ void loop() {
 	}*/
 }
 
-void moduleBluetooth(){
-	if(Serial.available() > 0){
-	   	while(Serial.available() > 0) {
-	   		data += char(Serial.read());
-	   		//Right
-	   		if(data == "R_Center"){Rdirection = data;data = "";}
-	   		if(data == "R_Up"){Rdirection = data;data = "";}
-	   		if(data == "R_U_Right"){Rdirection = data;data = "";}
-	   		if(data == "R_Right"){Rdirection = data;data = "";}
-	   		if(data == "R_D_Right"){Rdirection = data;data = "";}
-	   		if(data == "R_Down"){Rdirection = data;data = "";}
-	   		if(data == "R_D_Left"){Rdirection = data;data = "";}
-	   		if(data == "R_Left"){Rdirection = data;data = "";}
-	   		if(data == "R_U_Left"){Rdirection = data;data = "";}
-	   		
-	   		//Left
-	   		if(data == "L_Center"){Ldirection = data;data = "";}
-	   		if(data == "L_Up"){Ldirection = data;data = "";}
-	   		if(data == "L_U_Right"){Ldirection = data;data = "";}
-	   		if(data == "L_Right"){Ldirection = data;data = "";}
-	   		if(data == "L_D_Right"){Ldirection = data;data = "";}
-	   		if(data == "L_Down"){Ldirection = data;data = "";}
-	   		if(data == "L_D_Left"){Ldirection = data;data = "";}
-	   		if(data == "L_Left"){Ldirection = data;data = "";}
-	   		if(data == "L_U_Left"){Ldirection = data;data = "";}
-	   	}
-	}else{
-	   	data = "";
+void moduleNrf(){
+	int got_time = 0; //resposta do controle
+	int timeReset = 0; //time para ignorar resposta do controle
+	int BtnAnswer = 0; //grava o botão do controle
+	//Serial.println("Escutando");
+	while(true){
+		if(radio.available()){
+			while(radio.available()){
+				radio.read( &got_time, sizeof(int) ); 
+			}
+		}else{
+			timeReset++;
+		}
+			
+		if(got_time != 0 || timeReset == 100){
+			if(got_time > 0 && got_time < 17){//Margem dos botões do controle antes dos analogicos
+				//Serial.print("Resposta recebida ");
+				//Serial.println(got_time);
+				BtnAnswer = got_time;
+			}else if(got_time > 16){
+				if(got_time >= 17000 && got_time <= 17255){ //Rx
+					int Rx = got_time - 17000;
+				}else if(got_time >= 18000 && got_time <= 18255){//Ry
+					int Ry = got_time - 18000;
+				}else if(got_time >= 19000 && got_time <= 19255){//Lx
+					int Lx = got_time - 19000;
+				}else{//Ly
+					int Ly = got_time - 20000;
+				}
+			}
+			break;     
+		}
 	}
-}
-
-void moduleRf(){
-	
+	//Serial.println("Enviando resposta");
+	radio.stopListening();
+	//got_time = random(1, 1000);
+	radio.write(&got_time, sizeof(int));
+	radio.startListening();
 }
 
 double calculatePID_mpu(int varInt){
