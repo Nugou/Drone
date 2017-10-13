@@ -13,7 +13,8 @@
  * (Terminado)Montar o codigo do controle de PS2.
  * Montar o codigo de funçao do drone, como dar 360°, monitoramento de area, etc.
  * Montar o codigo do modulo GPS.
- * (Terminado) Montar o codigo do modulo nrf24l01 
+ * (Terminado) Montar o codigo do modulo nrf24l01, -> necessario mais teste para implementar no drone com sucesso 
+ * Extender o codigo do modulo nrf24l01 para verificação de conexão 
  */
 
  
@@ -66,6 +67,7 @@ bool radioNumber = 1; //Tipo do nrf24l01
 byte addresses[][6] = {"1Node","2Node"}; //endereço de comunicação dos nrf24l01
 
 double gyX, gyY, acY; //Dados da MPU
+double gyX_ori, gyY_ori, acY_ori; //Dados da MPU
 double mulMPU = 0.0056; //Multiplicador para converter os dados da MPU em angulo aproximado(-90 / 90)
 
 int Ly = 0; //Dados do analogico da esquerda eixo Y
@@ -138,7 +140,13 @@ void setup() {
 	radio.startListening();
 
 	/////////////////////////////////////////////////
-	
+
+	mpu.compute();
+	delay(500);
+	//Calcula a posição inicial do drone para definir a diferença de inclinação
+	gyX_ori = mpu.getGyX()*mulMPU;
+	gyY_ori = mpu.getGyY()*mulMPU;
+	acY_ori = mpu.getAcY()*mulMPU;
 }
 
 /*
@@ -172,9 +180,9 @@ void loop() {
 	Ry = map(Ry, 0, 255, -90, 90); //Remapeia os valores dos analogico para potencia de giro
 
 	//Recebe dados da MPU e converte para angulo somando o erro que vem do controle
-	gyX = mpu.getGyX()*mulMPU + Lx;
-	gyY = mpu.getGyY()*mulMPU + Ly;
-	acY = mpu.getAcY()*mulMPU;
+	gyX = mpu.getGyX()*mulMPU + Lx - gyX_ori;
+	gyY = mpu.getGyY()*mulMPU + Ly - gyY_ori;
+	acY = mpu.getAcY()*mulMPU - acY_ori;
 
 	//Filtra o dados da mpu para diminuir a variação brusca de dados errados
 	gyX = filterMPUx(gyX);
