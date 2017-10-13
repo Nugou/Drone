@@ -1,8 +1,8 @@
 /*
  * -------------Lembrete para o que precisa ser feito ou ideias para por no drone------------------
+ * (Adicionar ideias no drone caso precise)
  * 
- * Colocar acentos nas palavras do comentario, meu teclado esta bugado. 
- * Montar o codigo de operaçao dos motores.
+ * (Terminado)Montar o codigo de operaçao dos motores.
  * (Descontinuado)Montar o codigo do modulo RF 433Mhz.
  * (Descontinuado)Montar o codigo da Camera(Vga Ov7670). 
  * (Descontinuado)Montar o codigo do Modulo RF Lora1278(Melhor) -> Biblioteca pronta no github.
@@ -10,7 +10,7 @@
  * Montar o codigo EEPROM para memorizar dados importante. 
  * (Terminado)Montar o codigo do MPU-6050. -> Esperando testes no drone.
  * Montar o codigo para o drone voltar a origem quando: estar com bateria fraca, perdeu conexao com o controle. 
- * Montar o codigo do controle de PS2.
+ * (Terminado)Montar o codigo do controle de PS2.
  * Montar o codigo de funçao do drone, como dar 360°, monitoramento de area, etc.
  * Montar o codigo do modulo GPS.
  * (Terminado) Montar o codigo do modulo nrf24l01 
@@ -23,7 +23,6 @@
  * #Declarando bibliotecas e define
  */
 #include <MPUX.h>
-#include <Wire.h>
 #include <Servo.h>
 #include <PIDX.h>
 #include <SPI.h>
@@ -57,30 +56,29 @@ long timeCheckerCOM = 5; //Delay de verificaçao do Modulo de comunicação gera
 unsigned long timeMPU = timeCheckerMPU; //Tempo para leitura do módulo MPU-6050.(Nada alterar aqui)
 unsigned long timeCOM = timeCheckerCOM; //Tempo para leitura do módulo de comunicação.(Nada alterar aqui)
 
-double motor_Kp = 1.0; //tenta aproximar do valor setpoint (padrão: 0.002) 
-double motor_Ki = 0.0002; //adiciona valores para aproximar aproximação (padrão: 0.001)
-double motor_Kd = 0.0056; //Tenta manter estavel os valores (padrão: 0.0008)
+double motor_Kp = 1.0; //tenta aproximar do valor setpoint (padrão: 1.0) 
+double motor_Ki = 0.0002; //adiciona valores para aproximar aproximação (padrão: 0.0002)
+double motor_Kd = 0.0056; //Tenta manter estavel os valores (padrão: 0.0056)
+double motor_Setpoint = 0.0; //Setpoint inicial do PID 
 
-double motor_Setpoint = 0.0; //Nada a alterar
+bool radioNumber = 1; //Tipo do nrf24l01
 
-bool radioNumber = 1;
+byte addresses[][6] = {"1Node","2Node"}; //endereço de comunicação dos nrf24l01
 
-byte addresses[][6] = {"1Node","2Node"};
+double gyX, gyY, acY; //Dados da MPU
+double mulMPU = 0.0056; //Multiplicador para converter os dados da MPU em angulo aproximado(-90 / 90)
 
-double gyX, gyY, acY;
-double mulMPU = 0.0056;
-
-int Ly = 0;
-int Lx = 0;
-int Ry = 0;
-int Rx = 0;
+int Ly = 0; //Dados do analogico da esquerda eixo Y
+int Lx = 0; //Dados do analogico da esquerda eixo X
+int Ry = 0; //Dados do analogico da direita eixo Y
+int Rx = 0; //Dados do analogico da direita eixo X
 
 int upDown = 0;
 int roll = 0;
 int param = 4;
 
-double tempGyX[10];
-double tempGyY[10];
+double tempGyX[SIZE_FILTER]; //Filtro da MPU do eixo X
+double tempGyY[SIZE_FILTER]; //Filtro da MPU do eixo Y
 /*
  * ========================================================================================================================================================================================
  * #Fim da Declaração das variaveis globais
@@ -183,8 +181,8 @@ void loop() {
 	gyY = filterMPUy(gyY);
 
 	//Recebe os dados mapeados do controle
-	roll = Rx;
-	upDown = Ry;
+	roll = Rx; //Potencia de giro no proprio eixo
+	upDown = Ry; //Potencia de subida e descida
 
 	//Remapeia os angulos do giroscopio para potencia dos motores
 	potMotorTemp[0] = map((int)gyX, -90, 90, 0, 179);
@@ -192,10 +190,10 @@ void loop() {
 
 	
 	//Calcula a potencia dos motores
-	potencia[0] = (potMotorTemp[0] + (potMotorTemp[1]) + upDown + roll) / param;
-	potencia[1] = (potMotorTemp[0] + (255 - potMotorTemp[1]) + upDown - roll) / param;
-	potencia[2] = (255 - potMotorTemp[0] + (potMotorTemp[1]) + upDown - roll) / param;
-	potencia[3] = (255 - potMotorTemp[0] + (255 - potMotorTemp[1]) + upDown + roll) / param;
+	potencia[0] = (potMotorTemp[0] + (potMotorTemp[1]) + upDown + roll) / param; //Frente Esquerda
+	potencia[1] = (potMotorTemp[0] + (255 - potMotorTemp[1]) + upDown - roll) / param; //Frente Direita
+	potencia[2] = (255 - potMotorTemp[0] + (potMotorTemp[1]) + upDown - roll) / param; //Tras Esquerda
+	potencia[3] = (255 - potMotorTemp[0] + (255 - potMotorTemp[1]) + upDown + roll) / param; //Tras Direita
 
 	//Estabiliza a potencia dos motores
 	potMotor[0] = -pidMotor_0.Process(potencia[0]);
