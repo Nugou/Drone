@@ -1,7 +1,7 @@
 /*
- * -------------Lembrete para o que precisa ser feito ou ideias para por no drone------------------
+ * -------------Lembrete para o que precisa ser feito ou ideias para por no drone-------
+ * -----------
  * (Adicionar ideias no drone caso precise)
- * 
  * (Terminado)Montar o codigo de operaçao dos motores.
  * (Descontinuado)Montar o codigo do modulo RF 433Mhz.
  * (Descontinuado)Montar o codigo da Camera(Vga Ov7670). 
@@ -28,9 +28,11 @@
 #include <PIDX.h>
 #include <SPI.h>
 #include <RF24.h>
+#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
 
-#define POT_MAX 179
-#define POT_MIN 10
+#define POT_MAX 255
+#define POT_MIN -255
 
 /*
  * ========================================================================================================================================================================================
@@ -49,31 +51,10 @@ int pino_motor[4] = {3, 4, 5, 6}; //pino de controle dos motores
 int potMotor[4] = {POT_MIN, POT_MIN, POT_MIN, POT_MIN}; //Potencia final dos motores
 int potMotorTemp[4] = {0, 0, 0, 0}; //Potencia temporaria dos motores
 int potencia[4] = {0, 0, 0, 0}; //Potencia pré-calculada dos motores
-int pino_led = 10; //Led informativo de funcionamento
-int nrf_power = 2; //Utilize: 1 -> potencia baixa // 2 -> potencia minima // 3 -> potencia alta // 4 -> potencia maxima 
 
-String data = ""; //Dados recebido do joystick
+int pino_led = 2; //Led informativo de funcionamento
 
-long timeCheckerMPU = 50; //Delay de verificaçao do MPU-6050
-long timeCheckerCOM = 5; //Delay de verificaçao do Modulo de comunicação geral.(Modulo BlueTooth, Modulo RF NRF24L01)
-
-unsigned long timeMPU = timeCheckerMPU; //Tempo para leitura do módulo MPU-6050.(Nada alterar aqui)
-unsigned long timeCOM = timeCheckerCOM; //Tempo para leitura do módulo de comunicação.(Nada alterar aqui)
-
-double motor_Kp = 1.0; //tenta aproximar do valor setpoint (padrão: 1.0) 
-double motor_Ki = 0.0002; //adiciona valores para aproximar aproximação (padrão: 0.0002)
-double motor_Kd = 0.0056; //Tenta manter estavel os valores (padrão: 0.0056)
-double motor_Setpoint = 0.0; //Setpoint inicial do PID 
-
-boolean radioNumber = true; //Tipo do nrf24l01
-boolean testMode = false;
-boolean btn_enabled[16];
-
-byte addresses[][6] = {"1Node","2Node"}; //endereço de comunicação dos nrf24l01
-
-double gyX, gyY, acY; //Dados da MPU
-double gyX_ori, gyY_ori, acY_ori; //Dados da MPU
-double mulMPU = 0.0056; //Multiplicador para converter os dados da MPU em angulo aproximado(-90 / 90)
+int nrf_power = 3; //Utilize: 1 -> potencia baixa // 2 -> potencia minima // 3 -> potencia alta // 4 -> potencia maxima 
 
 int Ly = 128; //Dados do analogico da esquerda eixo Y
 int Lx = 128; //Dados do analogico da esquerda eixo X
@@ -87,7 +68,45 @@ int Rx_final = 0; //Dados do analogico da direita eixo X final
 
 int upDown = 0; //Numero de parametros no eixo z
 int roll = 0; //Numero de parametros no eixo y
-int param = 4; //NUmeros de parametros no eixo x
+int param = 4; //Numeros de parametros no eixo x
+int param_upDown = 1; //Multiplcador do paramentros upDown
+
+long timeCheckerMPU = 50; //Delay de verificaçao do MPU-6050
+long timeCheckerCOM = 5; //Delay de verificaçao do Modulo de comunicação geral.(Modulo BlueTooth, Modulo RF NRF24L01)
+long timeCheckerGPS = 1; //Delay de verifição do MOdulo de GPS
+long timeCheckerDAT = 300; //Delay de verifição do Envio de Dados
+
+unsigned long timeDAT = timeCheckerDAT;
+unsigned long timeGPS = timeCheckerGPS;
+unsigned long timeMPU = timeCheckerMPU; //Tempo para leitura do módulo MPU-6050.(Nada alterar aqui)
+unsigned long timeCOM = timeCheckerCOM; //Tempo para leitura do módulo de comunicação.(Nada alterar aqui)
+
+unsigned long gps_sentido = 0; //Sentido em graus do drone
+
+double gps_velocidade = 0; //Velocidade do drone
+double gps_altitude = 0; //Altitude do drone
+double gps_altitude_ori = 0; //Altitude do drone
+double gps_latitude = 0; //Latitude do drone
+double gps_longitude = 0; //Longitude do drone
+double gps_latitude_ori = 0; //Latitude do drone
+double gps_longitude_ori = 0; //Longitude do drone
+
+double motor_Kp = 1.5; //tenta aproximar do valor setpoint (padrão: 1.0) 
+double motor_Ki = 0.0; //adiciona valores para aproximar aproximação (padrão: 0.0002)
+double motor_Kd = 0.5; //Tenta manter estavel os valores (padrão: 0.0056)
+double motor_Setpoint = 0.0; //Setpoint inicial do PID 
+
+double gyX, gyY, gyZ; //Dados da MPU
+double gyX_final, gyY_final, gyZ_final; //Dados da MPU
+double gyX_ori, gyY_ori, gyZ_ori; //Dados da MPU iniciais
+double mulMPU = 0.0056; //Multiplicador para converter os dados da MPU em angulo aproximado(-90 / 90)
+
+boolean radioNumber = true; //Tipo do nrf24l01
+boolean testMode = true; //Ativa e Desativa o modo de teste
+boolean btn_enabled[16]; //Estados dos botões
+boolean gps_data = false; //Confirma sem todos os dados estão prontos
+
+byte addresses[][6] = {"1Node","2Node"}; //endereço de comunicação dos nrf24l01
 
 /*
  * ========================================================================================================================================================================================
@@ -100,6 +119,8 @@ int param = 4; //NUmeros de parametros no eixo x
  * ========================================================================================================================================================================================
  * #Declarando objetos
  */
+TinyGPSPlus gps;
+SoftwareSerial serial(9,10); //Rx -- Tx
 RF24 radio(7,8);
 MPUX mpu(MPU_end);
 Servo ServoMotor_0;
@@ -119,12 +140,36 @@ PIDX pidMotor_3(motor_Kp, motor_Ki, motor_Kd, motor_Setpoint);
 
 /*
  * ========================================================================================================================================================================================
+ * #Declarando Estruturas
+ */
+
+struct stDataDrone{
+	int stPotMotor[4] = {POT_MIN, POT_MIN, POT_MIN, POT_MIN};
+ 	int stBactery = 0;
+ 	double stHeight = 0;
+ 	double stGyZ = 0;
+ 	double stGpsLatitude = 0;
+	double stGpsLongitude = 0; 
+};
+typedef struct stDataDrone typeDataRf;
+typeDataRf recDataRf;
+typeDataRf traDataRf;
+
+/*
+ * ========================================================================================================================================================================================
+ * #Fim de declarando estruturas
+ */
+ 
+
+/*
+ * ========================================================================================================================================================================================
  * Configurações Iniciais
  */
 
 void setup() {
 	mpu.begin();
 	Serial.begin(115200);
+	serial.begin(9600);
 	SPI.begin();
 	radio.begin();
 	
@@ -134,6 +179,11 @@ void setup() {
 	ServoMotor_1.attach(pino_motor[1]);
 	ServoMotor_2.attach(pino_motor[2]);
 	ServoMotor_3.attach(pino_motor[3]);
+
+	ServoMotor_0.write(potMotor[0]);
+	ServoMotor_1.write(potMotor[1]);
+	ServoMotor_2.write(potMotor[2]);
+	ServoMotor_3.write(potMotor[3]);
 
 	/////////////////////////////////////////////////////////////////////
 
@@ -149,7 +199,15 @@ void setup() {
 	else if(nrf_power == 3){radio.setPALevel(RF24_PA_HIGH);}
 	else{radio.setPALevel(RF24_PA_MAX);}
 	
-	radio.startListening();
+	radio.stopListening();
+
+	pinMode(pino_led, OUTPUT);
+	digitalWrite(pino_led, LOW);
+	while(!btn_enabled[0] and !testMode){
+		moduleNrf();
+		delay(30);
+	}
+	digitalWrite(pino_led, HIGH);
 
 	/////////////////////////////////////////////////
 
@@ -158,31 +216,23 @@ void setup() {
 	//Calcula a posição inicial do drone para definir a diferença de inclinação
 	gyX_ori = mpu.getGyX()*mulMPU;
 	gyY_ori = mpu.getGyY()*mulMPU;
-	acY_ori = mpu.getAcY()*mulMPU;
+	gyZ_ori = mpu.getGyZ()*mulMPU;
 
 	Serial.print("X: ");Serial.println(gyX_ori);
 	Serial.print("Y: ");Serial.println(gyY_ori);
-	Serial.print("Z: ");Serial.println(acY_ori);
+	Serial.print("Z: ");Serial.println(gyZ_ori);
 
 	for(int i = 0; i < 16; i++){
 		btn_enabled[i] = false;
 	}
-
-	ServoMotor_0.write(potMotor[0]);
-	ServoMotor_1.write(potMotor[1]);
-	ServoMotor_2.write(potMotor[2]);
-	ServoMotor_3.write(potMotor[3]);
-
-	pinMode(pino_led, OUTPUT);
-	pinMode(9, INPUT);
-	digitalWrite(pino_led, LOW);
-	digitalWrite(9, LOW);
-	while(!btn_enabled[0]){
-		moduleNrf();
-		delay(30);
+	/*
+	char red = 'r';
+	Serial.println("Enviando confirmação!!!");
+	while(!radio.write(red, sizeof(char))){
+		delay(300);
 	}
-	digitalWrite(pino_led, HIGH);
-	delay(2000);
+	Serial.println("Confirmado!!!");*/
+	radio.startListening();
 }
 
 /*
@@ -210,19 +260,46 @@ void loop() {
 		moduleNrf();
 	}
 
+	//Verificador do modulo gps
+	if(timeGPS <= millis()){
+		timeGPS += timeCheckerGPS;
+		moduleGps();
+	}
+
+	//Verificador do Envio de Dados
+	if(timeDAT <= millis()){
+		timeDAT += timeCheckerDAT;
+		logDisplay();
+	}
+	
 	Lx_final = map(Lx, 0, 255, 45, -45); //Remapeia os valores dos analogico para angulo
 	Ly_final = map(Ly, 0, 255, -45, 45); //Remapeia os valores dos analogico para angulo
 	Rx_final = map(Rx, 0, 255, -90, 90); //Remapeia os valores dos analogico para potencia de giro
-	Ry_final = map(Ry, 0, 255, 420, -179);  //Remapeia os valores dos analogico para potencia de subida e descida
+	Ry_final = map(Ry, 0, 255, 179, -179);  //Remapeia os valores dos analogico para potencia de subida e descida
+	
+	//Inteligencia do drone
+	if(Lx_final != 0 || Ly_final != 0 || Rx_final != 0 || Ry_final != 0){
+		gyX = Ly_final - gyX_ori;//-41
+		gyY = Lx_final - gyY_ori;
+		//gyZ = Ry_final - gyZ_ori;
 
-	//Recebe dados da MPU e converte para angulo somando o erro que vem do controle
-	gyX = mpu.getGyX()*mulMPU + Ly_final - gyX_ori;
-	gyY = mpu.getGyY()*mulMPU + Lx_final - gyY_ori;
-	acY = mpu.getAcY()*mulMPU + Ry_final - acY_ori;
+		if(mpu.getGyX()*mulMPU - gyX_ori <= gyX and gyX < 0){gyX = -(mpu.getGyX()*mulMPU - gyX_ori);}
+		if(mpu.getGyX()*mulMPU - gyX_ori >= gyX and gyX > 0){gyX = -(mpu.getGyX()*mulMPU - gyX_ori);}
+		
+		if(mpu.getGyY()*mulMPU - gyY_ori <= gyY and gyY < 0){gyY = -(mpu.getGyY()*mulMPU - gyY_ori);}
+		if(mpu.getGyY()*mulMPU - gyY_ori >= gyY and gyY > 0){gyY = -(mpu.getGyY()*mulMPU - gyY_ori);}
+
+	}else{
+		gyX = -(mpu.getGyX()*mulMPU - gyX_ori);
+		gyY = -(mpu.getGyY()*mulMPU - gyY_ori);
+		gyZ = -(mpu.getGyZ()*mulMPU - gyZ_ori);
+	}
+
+		
 
 	//Recebe os dados mapeados do controle
 	roll = -Rx_final; //Potencia de giro no proprio eixo
-	upDown = acY; //Potencia de subida e descida
+	upDown = Ry_final; //Potencia de subida e descida
 
 	//Remapeia os angulos do giroscopio para potencia dos motores
 	potMotorTemp[0] = map((int)gyX, -90, 90, POT_MIN, POT_MAX);
@@ -252,7 +329,6 @@ void loop() {
 	//Verificador de botões do controle
 	btnAction();
 
-
 	//Atualiza a potencia dos motores
 	if(!testMode){
 		ServoMotor_0.write(potMotor[0]);
@@ -260,21 +336,31 @@ void loop() {
 		ServoMotor_2.write(potMotor[2]);
 		ServoMotor_3.write(potMotor[3]);
 	}else{
-		Serial.print("M1: ");	Serial.print(potMotor[0]);
+		/*Serial.print("M1: ");	Serial.print(potMotor[0]);
 		Serial.print(" -- M2: ");	Serial.print(potMotor[1]);
 		Serial.print(" -- M3: ");	Serial.print(potMotor[2]);
 		Serial.print(" -- M4: ");	Serial.print(potMotor[3]);
-		//Serial.print(" -- X: ");	Serial.print(gyX);
-		//Serial.print(" -- Y: ");	Serial.print(gyY);
-		Serial.print(" -- Z: ");	Serial.print(acY);
+		Serial.print(" -- X: ");	Serial.print(gyX);
+		Serial.print(" -- Y: ");	Serial.print(gyY);
+		Serial.print(" -- Z: ");	Serial.print(gyZ);
 		//Serial.print(" -- Lx: ");	Serial.print(Lx_final);
 		//Serial.print(" -- Ly: ");	Serial.print(Ly_final);
 		//Serial.print(" -- Rx: ");	Serial.print(Rx_final);
 		//Serial.print(" -- Ry: ");	Serial.print(Ry_final);
 		//Serial.print(" -- Roll: ");	Serial.print(roll);
 		//Serial.print(" -- UpDown: ");	Serial.print(upDown);
-
-		Serial.println();
+		
+		if (gps.location.isValid()){
+			Serial.print(" -- Lat: ");
+			Serial.print(gps.location.lat(), 6);
+			Serial.print(" -- Lon: ");
+		    Serial.print(gps.location.lng(), 6);
+		}
+		if(gps.altitude.isValid()){
+			Serial.print(" -- Alt: ");
+			Serial.print(gps.altitude.meters(), 2);
+		}*/
+		//Serial.println();
 	}
 }
 
@@ -284,6 +370,37 @@ void loop() {
  * Fim do Loop Arduino
  */
 
+
+
+/*
+ * ========================================================================================================================================================================================
+ * Log de informação para o display
+ */
+ 
+void logDisplay(){
+	traDataRf.stPotMotor[0] = potMotor[0];
+	traDataRf.stPotMotor[1] = potMotor[1];
+	traDataRf.stPotMotor[2] = potMotor[2];
+	traDataRf.stPotMotor[3] = potMotor[3];	
+	traDataRf.stBactery = 0;
+	traDataRf.stHeight = 0;
+	traDataRf.stGyZ = gyZ;
+	traDataRf.stGpsLatitude = gps.location.lat();
+	traDataRf.stGpsLongitude = gps.location.lng();
+	
+	radio.stopListening();delay(30);
+	Serial.println(traDataRf.stGpsLongitude,6);
+	for(int i = 0; i < 2; i++){
+		radio.write(&traDataRf, sizeof(typeDataRf));delay(30);
+	}
+	radio.startListening();
+	
+}
+ 
+/*
+ * ========================================================================================================================================================================================
+ * Fim do Log de informação para o display
+ */
  
 
 /*
@@ -295,15 +412,14 @@ void moduleNrf(){
 	int timeReset = 0; //time para ignorar resposta do controle
 	int BtnAnswer = 0; //grava o botão do controle
 	//Serial.println("Escutando");
-	while(true){
-		
+	while(true){	
 		if(radio.available()>0){
 			while(radio.available()){
 				radio.read( &got_time, sizeof(int) ); 
 				delay(20);
 			}
-			//Serial.print("Resposta recebida ");
-			//Serial.println(got_time);
+			Serial.print("Resposta recebida ");
+			Serial.println(got_time);
 		}else{
 			timeReset++;
 		}
@@ -320,10 +436,7 @@ void moduleNrf(){
 				}else{//Ly
 					Ly = got_time - 20000;
 				}
-			}/*
-			radio.stopListening();delay(30);
-			radio.write(&got_time, sizeof(int));delay(30);
-			radio.startListening();*/
+			}
 			break;     
 		}
 	}
@@ -410,4 +523,36 @@ void btnAction(){
  * ========================================================================================================================================================================================
  * Fim das Funções de botões
  */
- 
+
+
+
+ /*
+ * ========================================================================================================================================================================================
+ * Modulo GPS
+ */
+void moduleGps(){
+	//Serial.println("MOdulo GPS");
+	while(serial.available() > 0){
+		if(gps.encode(serial.read())){
+			if (gps.location.isValid()){
+				gps_latitude = gps.location.lat();
+				gps_longitude = gps.location.lng();
+				Serial.print("LON: ");Serial.println(gps_longitude);
+			}
+			if(gps.speed.isValid()){
+				gps_velocidade = gps.speed.kmph();
+				//Serial.print("VEL: ");Serial.println(gps_velocidade);
+			}
+			if(gps.altitude.isValid()){
+				gps_altitude = gps.altitude.value();
+			}
+		}
+	}
+		
+	//Serial.println("Fim MOdulo GPS");
+}
+
+ /*
+ * ========================================================================================================================================================================================
+ * Fim do Modulo GPS
+ */
